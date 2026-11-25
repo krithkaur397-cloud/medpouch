@@ -1,0 +1,98 @@
+name: Screenshots
+
+# Actions tab -> Screenshots -> "Run workflow": runs the app in a 6.9-inch iPhone simulator
+# with sample data (Debug build, -MedPouchDemo), captures one screen per tab, keeps them as
+# a run artifact, and uploads them to the App Store version being prepared (replacing the
+# screenshots already in the 6.9-inch slot). Uses the same secrets as the iOS workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: "Upload the screenshots to App Store Connect"
+        type: boolean
+        default: true
+
+env:
+  BUNDLE_ID: com.krithkaur.medpouch
+
+jobs:
+  screenshots:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build for the iOS Simulator (Debug, unsigned)
+        run: |
+          xcodebuild -version
+          xcodebuild build \
+            -project MedPouch.xcodeproj -scheme MedPouch -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO -quiet
+
+      - name: Boot a 6.9-inch iPhone simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          best = None
+          for runtime, devices in json.load(sys.stdin)["devices"].items():
+              if "iOS" not in runtime:
+                  continue
+              rv = tuple(int(x) for x in re.findall(r"\d+", runtime.split("iOS")[-1]))
+              for d in devices:
+                  m = re.fullmatch(r"iPhone (\d+) Pro Max", d["name"])
+                  if m and d.get("isAvailable", True):
+                      key = (rv, int(m.group(1)))
+                      if best is None or key > best[0]:
+                          best = (key, d["udid"], d["name"], runtime)
+          if best is None:
+              sys.exit("No iPhone Pro Max simulator is installed")
+          print(f"Using {best[2]} on {best[3]}", file=sys.stderr)
+          print(best[1])
+          ')
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          echo "SIM=$udid" >> "$GITHUB_ENV"
+
+      - name: Capture one screenshot per tab
+        run: |
+          app="$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/MedPouch.app"
+          xcrun simctl install "$SIM" "$app"
+          xcrun simctl status_bar "$SIM" override --time "9:41" \
+            --dataNetwork wifi --wifiMode active --wifiBars 3 \
+            --cellularMode active --cellularBars 4 \
+            --batteryState charged --batteryLevel 100
+          mkdir -p screenshots
+          names=(1-home 2-medications 3-prescriptions 4-emergency-card 5-profile)
+          for tab in 0 1 2 3 4; do
+            xcrun simctl terminate "$SIM" "$BUNDLE_ID" 2>/dev/null || true
+            xcrun simctl launch "$SIM" "$BUNDLE_ID" -MedPouchDemo -MedPouchTab "$tab"
+            if [ "$tab" = 0 ]; then sleep 12; else sleep 6; fi
+            xcrun simctl io "$SIM" screenshot --type=jpeg "screenshots/${names[$tab]}.jpg"
+          done
+          for f in screenshots/*.jpg; do
+            echo "$f: $(sips -g pixelWidth -g pixelHeight "$f" | awk '/pixel/ {printf "%s ", $2}')"
+          done
+
+      - name: Keep the screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ github.run_number }}
+          path: screenshots
+
+      - name: Upload to App Store Connect
+        if: inputs.upload
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          key="$RUNNER_TEMP/AuthKey.p8"
+          KEY_OUT="$key" python3 .github/scripts/write_asc_key.py
+          chmod 600 "$key"
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet "pyjwt[crypto]"
+          ASC_KEY_PATH="$key" "$RUNNER_TEMP/venv/bin/python" .github/scripts/upload_screenshots.py screenshots/*.jpg
+          rm -f "$key"

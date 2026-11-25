@@ -15,6 +15,12 @@ struct MedPouchApp: App {
 
     let persistenceController = PersistenceController.shared
 
+    init() {
+        #if DEBUG
+        DemoData.installIfRequested(into: PersistenceController.shared.container.viewContext)
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {

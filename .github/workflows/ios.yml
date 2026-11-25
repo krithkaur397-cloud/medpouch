@@ -65,36 +65,7 @@ jobs:
           done
           [ "$missing" = 0 ] || exit 1
           key="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
-          # Rebuild a clean PEM file whatever the paste looked like: Windows line
-          # endings, lost line breaks, extra spaces, or the whole file base64-encoded.
-          # Only lengths and yes/no facts are printed, never the key itself.
-          KEY_OUT="$key" python3 - <<'PY'
-          import base64, binascii, os, re, sys, textwrap
-          raw = os.environ["ASC_KEY_P8"]
-          print(f"ASC_KEY_P8: {len(raw)} characters, {raw.count(chr(10)) + 1} lines, "
-                f"Windows line endings: {'yes' if chr(13) in raw else 'no'}, "
-                f"BEGIN line: {'yes' if 'BEGIN PRIVATE KEY' in raw else 'no'}, "
-                f"END line: {'yes' if 'END PRIVATE KEY' in raw else 'no'}")
-          def body_of(text):
-              m = re.search(r"-----BEGIN PRIVATE KEY-----(.*?)-----END PRIVATE KEY-----", text, re.S)
-              return re.sub(r"\s+", "", m.group(1) if m else text)
-          body = body_of(raw)
-          if "BEGIN PRIVATE KEY" not in raw:
-              try:
-                  decoded = base64.b64decode(body, validate=True).decode("ascii")
-                  if "BEGIN PRIVATE KEY" in decoded:
-                      print("ASC_KEY_P8 holds the whole .p8 file base64-encoded; decoding it.")
-                      body = body_of(decoded)
-              except (binascii.Error, UnicodeDecodeError):
-                  pass
-          try:
-              der = base64.b64decode(body, validate=True)
-          except binascii.Error:
-              sys.exit("::error::ASC_KEY_P8 is not a .p8 private key. Paste the whole text of AuthKey_XXXXXXXXXX.p8, BEGIN and END lines included.")
-          print(f"Key body: {len(body)} base64 characters, {len(der)} bytes.")
-          with open(os.environ["KEY_OUT"], "w") as f:
-              f.write("-----BEGIN PRIVATE KEY-----\n" + "\n".join(textwrap.wrap(body, 64)) + "\n-----END PRIVATE KEY-----\n")
-          PY
+          KEY_OUT="$key" python3 .github/scripts/write_asc_key.py
           chmod 600 "$key"
           if ! openssl pkey -in "$key" -noout 2>/dev/null; then
             echo "::error::ASC_KEY_P8 does not decode to a valid private key. Re-create the secret from the downloaded AuthKey_$ASC_KEY_ID.p8 file (its Key ID must match ASC_KEY_ID)."

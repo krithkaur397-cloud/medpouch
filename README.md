@@ -33,6 +33,8 @@ One-time setup:
    - `ASC_ISSUER_ID`: the Issuer ID
    - `ASC_KEY_P8`: the whole text of the `.p8` file, including the BEGIN/END lines
 
+Screenshots: **Actions → Screenshots → Run workflow** runs a Debug build in a 6.9-inch iPhone simulator with sample data (`MedPouch/App/DemoData.swift`, used only with the `-MedPouchDemo` launch argument and absent from Release builds), captures one screen per tab, and uploads them to the App Store version being prepared.
+
 Each release: run the workflow, wait for the build to finish processing in App Store Connect → TestFlight, install it on an iPhone with TestFlight, take screenshots, then fill in the listing from `docs/APP_STORE_SUBMISSION.md` and **Add for Review**. The build number is the workflow run number, so it always goes up; bump `MARKETING_VERSION` in the project for a new version (1.1, 2.0, ...).
 
 ## Project layout
